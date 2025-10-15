@@ -1,0 +1,84 @@
+steps:
+  # Step 1: Build FastAPI Backend
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--platform=linux/amd64'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/reguscope-api:$SHORT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/reguscope-api:latest'
+      - '-f'
+      - 'docker/Dockerfile'
+      - '.'
+    id: 'build-api'
+    waitFor: ['-']
+
+  # Step 2: Push API Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/reguscope-api:$SHORT_SHA']
+    id: 'push-api'
+    waitFor: ['build-api']
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'reguscope-api'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/reguscope-api:$SHORT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '300'
+      - '--allow-unauthenticated'
+    id: 'deploy-api'
+    waitFor: ['push-api']
+
+  # Step 4: Build RAGOps Job
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--platform=linux/amd64'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ragops-job:$SHORT_SHA'
+      - '-f'
+      - 'ragops-job/Dockerfile'
+      - '.'
+    id: 'build-ragops'
+    waitFor: ['-']
+
+  # Step 5: Push RAGOps Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/ragops-job:$SHORT_SHA']
+    id: 'push-ragops'
+    waitFor: ['build-ragops']
+
+  # Step 6: Update RAGOps Job
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'jobs'
+      - 'update'
+      - 'ragops-ingestion'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/ragops-job:$SHORT_SHA'
+      - '--region'
+      - 'us-central1'
+    id: 'update-ragops'
+    waitFor: ['push-ragops']
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1800s
