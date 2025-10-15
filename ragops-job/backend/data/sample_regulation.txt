@@ -1,0 +1,11 @@
+ITAR Section 121.1 - Definition of Significant Parts and Components
+(a) General Rule: Any item or technical data designated as a defense article on the U.S. Munitions List (USML) requires an export license unless a specific exemption applies. This includes major platforms, components, parts, accessories, and attachments.
+
+(b) Technical Data Transfer: The release or transfer of technical data (even intangible transfers such as oral communication or visual inspection) to a foreign national within the United States (a 'deemed export') is considered an export for the purposes of this section. 'Technical data' explicitly includes blueprints, design specifications, and manufacturing process sheets.
+
+(c) Compliance and Auditing: All companies engaging in the manufacture or export of defense articles must maintain a comprehensive audit trail for a minimum of five (5) years from the date of the last transaction. This trail must document the disposition and classification of all controlled articles.
+
+AECA Section 202 - Penalties for Non-Compliance
+(d) Civil Penalties: Any violation of the Arms Export Control Act (AECA) or its regulations may result in civil fines not to exceed $1,200,000 per violation. The Department of State, Directorate of Defense Trade Controls (DDTC), holds primary enforcement authority.
+
+(e) Voluntary Disclosure: In the event of potential non-compliance, companies are strongly encouraged to file a Voluntary Disclosure to the DDTC within 30 days of discovery. Timely and complete disclosure is a significant mitigating factor in the determination of final penalty amounts. This policy applies strictly to self-reported violations only.

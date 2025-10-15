@@ -1,0 +1,6 @@
+qdrant-client
+sentence-transformers
+torch
+langchain-community
+python-dotenv
+google-cloud-storage
