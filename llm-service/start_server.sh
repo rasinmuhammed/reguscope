@@ -26,21 +26,38 @@ echo "  Context Size: 4096 tokens"
 echo "  Threads: 1 (Free Tier CPU)"
 echo ""
 
-# Start llama.cpp server using the binary from /usr/local/bin
-# The binary is called 'llama-server' in newer versions
-if command -v llama-server &> /dev/null; then
-    LLAMA_BIN="llama-server"
-elif command -v server &> /dev/null; then
-    LLAMA_BIN="server"
-else
+# Find the llama.cpp server binary
+LLAMA_BIN=""
+for bin_name in llama-server server llama-cli; do
+    if command -v "$bin_name" &> /dev/null; then
+        LLAMA_BIN="$bin_name"
+        break
+    fi
+    
+    # Check in /usr/local/bin
+    if [ -f "/usr/local/bin/$bin_name" ]; then
+        LLAMA_BIN="/usr/local/bin/$bin_name"
+        break
+    fi
+    
+    # Check in build directory
+    if [ -f "/usr/local/build/bin/$bin_name" ]; then
+        LLAMA_BIN="/usr/local/build/bin/$bin_name"
+        break
+    fi
+done
+
+if [ -z "$LLAMA_BIN" ]; then
     echo "❌ Error: llama.cpp server binary not found"
+    echo "Searching in common locations..."
+    find /usr/local -name "*server*" -o -name "*llama*" 2>/dev/null || true
     exit 1
 fi
 
 echo "Using binary: $LLAMA_BIN"
 
 # Start server with optimized settings for Cloud Run Free Tier
-$LLAMA_BIN \
+"$LLAMA_BIN" \
     --model "$MODEL_PATH" \
     --host "$HOST" \
     --port "$PORT" \

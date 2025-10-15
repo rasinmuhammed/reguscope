@@ -3,7 +3,6 @@ import requests
 from typing import Dict, Any, TypedDict, List
 from dotenv import load_dotenv
 
-from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
@@ -17,11 +16,31 @@ QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "reguscope_complian
 EMBEDDING_MODEL_NAME = "BAAI/bge-m3"
 
 # Cloud Run LLM Configuration
-CLOUD_RUN_LLM_URL = os.getenv("CLOUD_RUN_LLM_URL")  # Set this to your service URL
+CLOUD_RUN_LLM_URL = os.getenv("CLOUD_RUN_LLM_URL")
+
+# Validate required env vars
+if not CLOUD_RUN_LLM_URL:
+    raise ValueError("CLOUD_RUN_LLM_URL environment variable must be set")
+
+print(f"Initializing ReguScope Agent...")
+print(f"  Qdrant: {QDRANT_HOST}:{QDRANT_PORT}")
+print(f"  Collection: {QDRANT_COLLECTION_NAME}")
+print(f"  LLM URL: {CLOUD_RUN_LLM_URL}")
 
 # Initialize global resources
-qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-embeddings_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device='cpu')
+try:
+    qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=30)
+    print(f"✓ Qdrant connected")
+except Exception as e:
+    print(f"✗ Qdrant connection failed: {e}")
+    raise
+
+try:
+    embeddings_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device='cpu')
+    print(f"✓ Embedding model loaded")
+except Exception as e:
+    print(f"✗ Embedding model failed: {e}")
+    raise
 
 
 # --- Custom LLM Wrapper for Cloud Run ---
@@ -29,28 +48,34 @@ class CloudRunLLM:
     """Wrapper for llama.cpp server running on Cloud Run"""
     
     def __init__(self, endpoint_url: str, timeout: int = 60):
-        self.endpoint_url = endpoint_url.rstrip('/') + '/completion'
+        self.endpoint_url = endpoint_url.rstrip('/') + '/v1/chat/completions'
         self.timeout = timeout
+        print(f"CloudRunLLM initialized: {self.endpoint_url}")
     
     def invoke(self, prompt: str, max_tokens: int = 500, temperature: float = 0.7) -> str:
-        """Call the Cloud Run LLM service"""
+        """Call the Cloud Run LLM service using OpenAI-compatible API"""
         try:
             response = requests.post(
                 self.endpoint_url,
                 json={
-                    "prompt": prompt,
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ],
                     "max_tokens": max_tokens,
                     "temperature": temperature,
-                    "stop": ["\n\n", "###"]
+                    "stream": False
                 },
                 timeout=self.timeout
             )
             response.raise_for_status()
             result = response.json()
-            return result.get('content', '').strip()
+            
+            # Extract content from OpenAI-style response
+            content = result['choices'][0]['message']['content']
+            return content.strip()
         
         except requests.exceptions.Timeout:
-            raise Exception("LLM request timeout - Cloud Run may be cold starting")
+            raise Exception("LLM request timeout - Cloud Run may be cold starting (wait 60s and retry)")
         except requests.exceptions.RequestException as e:
             raise Exception(f"LLM request failed: {str(e)}")
 
@@ -112,7 +137,7 @@ Sub-questions:"""
     return state
 
 
-# --- Node 2: Retrieval Agent (Unchanged) ---
+# --- Node 2: Retrieval Agent ---
 def retrieval_node(state: AgentState) -> AgentState:
     """Executes semantic search against Qdrant."""
     print("📚 Node 2: Retrieval from Qdrant")
@@ -216,7 +241,7 @@ Answer:"""
     return state
 
 
-# --- Node 4: Validation Agent (Unchanged) ---
+# --- Node 4: Validation Agent ---
 def validation_node(state: AgentState) -> AgentState:
     """Basic validation checks."""
     print("✅ Node 4: Validation")
@@ -237,7 +262,7 @@ def validation_node(state: AgentState) -> AgentState:
     return state
 
 
-# --- Build LangGraph Workflow (Unchanged) ---
+# --- Build LangGraph Workflow ---
 def build_agent_graph():
     """Constructs the stateful LangGraph workflow."""
     workflow = StateGraph(AgentState)
@@ -256,10 +281,12 @@ def build_agent_graph():
     return workflow.compile()
 
 
+print("Building agent graph...")
 agent_graph = build_agent_graph()
+print("✓ Agent graph ready")
 
 
-# --- Main Invocation Function (Unchanged) ---
+# --- Main Invocation Function ---
 def agent_workflow_invoke_sync(query: str, user_id: str, trace_id: str | None) -> Dict[str, Any]:
     """Executes the full Agentic Flow Protocol."""
     print(f"\n{'='*60}")
