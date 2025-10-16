@@ -1,24 +1,16 @@
 fastapi
 uvicorn[standard]
 pydantic
-
-langchain-core
-langgraph
-
-langchain-community
-langchain-huggingface
-
-qdrant-client
-
-pypdf
-unstructured
-
-torch
-transformers
-sentence-transformers
-
 python-dotenv
 
-langfuse
+qdrant-client
+sentence-transformers
+
+langgraph
+langchain-core
+langchain-community
 
 requests
+pypdf
+
+langfuse

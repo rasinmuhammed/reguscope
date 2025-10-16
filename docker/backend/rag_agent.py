@@ -27,20 +27,42 @@ print(f"  Qdrant: {QDRANT_HOST}:{QDRANT_PORT}")
 print(f"  Collection: {QDRANT_COLLECTION_NAME}")
 print(f"  LLM URL: {CLOUD_RUN_LLM_URL}")
 
-# Initialize global resources
-try:
-    qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=30)
-    print(f"✓ Qdrant connected")
-except Exception as e:
-    print(f"✗ Qdrant connection failed: {e}")
-    raise
+# Initialize global resources ONCE at startup
+_qdrant_client = None
+_embeddings_model = None
 
-try:
-    embeddings_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device='cpu')
-    print(f"✓ Embedding model loaded")
-except Exception as e:
-    print(f"✗ Embedding model failed: {e}")
-    raise
+def get_qdrant_client():
+    """Lazy load and cache Qdrant client"""
+    global _qdrant_client
+    if _qdrant_client is None:
+        try:
+            _qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=30)
+            print(f"✓ Qdrant connected")
+        except Exception as e:
+            print(f"✗ Qdrant connection failed: {e}")
+            raise
+    return _qdrant_client
+
+def get_embeddings_model():
+    """Lazy load and cache embedding model (loaded ONCE)"""
+    global _embeddings_model
+    if _embeddings_model is None:
+        try:
+            # Use fp16 (half precision) to save memory
+            _embeddings_model = SentenceTransformer(
+                EMBEDDING_MODEL_NAME, 
+                device='cpu',
+                model_kwargs={"torch_dtype": "float16"}
+            )
+            print(f"✓ Embedding model loaded (fp16)")
+        except Exception as e:
+            print(f"✗ Embedding model failed: {e}")
+            raise
+    return _embeddings_model
+
+# Immediate initialization
+qdrant_client = get_qdrant_client()
+embeddings_model = get_embeddings_model()
 
 
 # --- Custom LLM Wrapper for Cloud Run ---
@@ -143,18 +165,20 @@ def retrieval_node(state: AgentState) -> AgentState:
     print("📚 Node 2: Retrieval from Qdrant")
     
     all_contexts = []
+    client = get_qdrant_client()
+    model = get_embeddings_model()
     
     for sub_query in state["decomposed_queries"]:
         print(f"   Searching for: {sub_query[:60]}...")
         
         try:
-            query_vector = embeddings_model.encode(
+            query_vector = model.encode(
                 sub_query, 
                 convert_to_numpy=True,
                 normalize_embeddings=True
             ).tolist()
             
-            search_results = qdrant_client.search(
+            search_results = client.search(
                 collection_name=QDRANT_COLLECTION_NAME,
                 query_vector=query_vector,
                 limit=3,
