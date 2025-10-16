@@ -1,0 +1,90 @@
+# Stage 1: Model downloader
+FROM --platform=linux/amd64 python:3.10-slim AS model-downloader
+
+RUN pip install --no-cache-dir google-cloud-storage==2.14.0
+
+ARG MODEL_BUCKET=reguscope-models
+ARG MODEL_FILE=Phi-3-mini-4k-instruct-Q4_K_M.gguf
+ARG PROJECT_ID
+
+RUN mkdir -p /models
+COPY key.json /tmp/key.json
+ENV GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json
+COPY download_model.py /tmp/download_model.py
+
+RUN PROJECT_ID=${PROJECT_ID} MODEL_BUCKET=${MODEL_BUCKET} MODEL_FILE=${MODEL_FILE} python /tmp/download_model.py
+RUN test -f /models/${MODEL_FILE} || exit 1
+RUN ls -lh /models/
+
+# Stage 2: Build llama.cpp
+FROM --platform=linux/amd64 ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential cmake git curl ca-certificates libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN git clone --depth 1 --branch b4368 https://github.com/ggerganov/llama.cpp.git
+WORKDIR /app/llama.cpp
+
+RUN cmake -S . -B build \
+    -DLLAMA_CURL=ON \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DLLAMA_BUILD_EXAMPLES=ON \
+    -DLLAMA_OPENMP=ON \
+    -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build --config Release -j4
+
+# DEBUG: Find and display all built files
+RUN echo "=== ALL .so FILES ===" && find /app/llama.cpp/build -name "*.so*" -type f && \
+    echo "=== EXECUTABLE ===" && find /app/llama.cpp/build -name "llama-server" -type f && \
+    echo "=== CHECK DEPENDENCIES ===" && ldd /app/llama.cpp/build/bin/llama-server
+
+# Stage 3: Final image
+FROM --platform=linux/amd64 ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    libcurl4 ca-certificates libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the server binary
+COPY --from=builder /app/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+RUN chmod +x /usr/local/bin/llama-server
+
+# Copy ALL libraries from build directory recursively
+RUN mkdir -p /usr/local/lib
+COPY --from=builder /app/llama.cpp/build/ /tmp/llama-build/
+
+# Find and move all .so files to lib directory
+RUN find /tmp/llama-build -name "*.so*" -type f -exec cp {} /usr/local/lib/ \; && \
+    ls -lah /usr/local/lib/*.so* 2>/dev/null || echo "No .so files found" && \
+    ldconfig && \
+    echo "=== LIBRARY PATH ===" && ldconfig -p | grep llama || echo "No llama libraries in cache"
+
+# Verify the binary can start (will fail on port but that's OK)
+RUN echo "=== TESTING BINARY ===" && \
+    /usr/local/bin/llama-server --version || \
+    (/usr/local/bin/llama-server --help 2>&1 | head -20) || \
+    echo "Binary test complete"
+
+# Copy downloaded model
+COPY --from=model-downloader /models /models
+
+ARG MODEL_FILE=Phi-3-mini-4k-instruct-Q4_K_M.gguf
+RUN test -f /models/${MODEL_FILE} || exit 1
+
+WORKDIR /app
+COPY start_server_optimized.sh /app/start_server.sh
+RUN chmod +x /app/start_server.sh
+
+# Environment variables
+ENV MODEL_FILE=Phi-3-mini-4k-instruct-Q4_K_M.gguf
+ENV MODEL_PATH=/models/${MODEL_FILE}
+ENV HOST=0.0.0.0
+ENV PORT=8080
+
+EXPOSE 8080
+
+CMD ["/app/start_server.sh"]
